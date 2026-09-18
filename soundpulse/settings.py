@@ -38,7 +38,6 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # Top priority for CORS handling
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -46,6 +45,12 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+try:
+    import whitenoise
+    MIDDLEWARE.insert(2, 'whitenoise.middleware.WhiteNoiseMiddleware')
+except ImportError:
+    pass
 
 ROOT_URLCONF = 'soundpulse.urls'
 
@@ -138,8 +143,42 @@ REST_FRAMEWORK = {
 }
 
 # CORS Configuration
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'True').lower() in ('true', '1', 'yes')
 CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOWED_ORIGINS = [
+    "https://soundpulse-client-1.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+]
+
+env_cors = os.getenv('CORS_ALLOWED_ORIGINS', '')
+if env_cors:
+    for origin in env_cors.split(','):
+        origin = origin.strip()
+        if origin and origin not in CORS_ALLOWED_ORIGINS:
+            CORS_ALLOWED_ORIGINS.append(origin)
+
+# CSRF Configuration
+CSRF_TRUSTED_ORIGINS = [
+    "https://soundpulse-client-1.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+]
+
+env_csrf = os.getenv('CSRF_TRUSTED_ORIGINS', '')
+if env_csrf:
+    for origin in env_csrf.split(','):
+        origin = origin.strip()
+        if origin and origin not in CSRF_TRUSTED_ORIGINS:
+            CSRF_TRUSTED_ORIGINS.append(origin)
+
 CORS_ALLOW_METHODS = [
     'DELETE',
     'GET',
