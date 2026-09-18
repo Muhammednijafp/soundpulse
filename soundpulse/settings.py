@@ -155,6 +155,10 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:8000",
 ]
 
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.vercel\.app$",
+]
+
 env_cors = os.getenv('CORS_ALLOWED_ORIGINS', '')
 if env_cors:
     for origin in env_cors.split(','):
@@ -165,6 +169,7 @@ if env_cors:
 # CSRF Configuration
 CSRF_TRUSTED_ORIGINS = [
     "https://soundpulse-client-1.vercel.app",
+    "https://*.vercel.app",
     "http://localhost:3000",
     "http://localhost:5173",
     "http://127.0.0.1:3000",
@@ -198,5 +203,11 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
     'range',
+]
+CORS_EXPOSE_HEADERS = [
+    'Content-Range',
+    'Content-Length',
+    'Accept-Ranges',
+    'Content-Disposition',
 ]
 
