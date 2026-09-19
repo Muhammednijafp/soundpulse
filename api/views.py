@@ -120,18 +120,24 @@ class StreamAudioAPIView(APIView):
             )
 
         try:
-            direct_url = get_direct_audio_url(url_or_id)
-            req = urllib.request.Request(
-                direct_url,
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': '*/*',
-                }
-            )
+            from .services import get_direct_audio_stream_info
+            stream_info = get_direct_audio_stream_info(url_or_id)
+            direct_url = stream_info['url']
+            upstream_headers = stream_info.get('headers', {})
+
+            req_headers = {
+                'User-Agent': upstream_headers.get('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'),
+                'Accept': upstream_headers.get('Accept', '*/*'),
+                'Accept-Language': upstream_headers.get('Accept-Language', 'en-US,en;q=0.9'),
+            }
+            if 'Sec-Fetch-Mode' in upstream_headers:
+                req_headers['Sec-Fetch-Mode'] = upstream_headers['Sec-Fetch-Mode']
+
             range_header = request.headers.get('Range')
             if range_header:
-                req.add_header('Range', range_header)
+                req_headers['Range'] = range_header
 
+            req = urllib.request.Request(direct_url, headers=req_headers)
             upstream = urllib.request.urlopen(req, timeout=30)
             content_type = upstream.headers.get('Content-Type', 'audio/mp4')
             content_length = upstream.headers.get('Content-Length')

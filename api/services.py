@@ -145,8 +145,11 @@ def get_track_info(target_url_or_id):
         'formatsAvailable': ['320 kbps (Studio MP3)', '192 kbps (High MP3)', '128 kbps (Standard MP3)']
     }
 
-def get_direct_audio_url(target_url_or_id):
-    """Get the direct high-speed audio stream link for web player"""
+def get_direct_audio_stream_info(target_url_or_id):
+    """
+    Extract the direct audio stream URL and required HTTP headers using multi-client extractors
+    (Android, iOS, Web, MWeb) to prevent datacenter 403 Forbidden blocks.
+    """
     target = target_url_or_id.strip()
     if not target.startswith('http://') and not target.startswith('https://'):
         target = f"https://www.youtube.com/watch?v={target}"
@@ -156,13 +159,29 @@ def get_direct_audio_url(target_url_or_id):
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'web', 'mweb']
+            }
+        }
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(target, download=False)
         if not info or 'url' not in info:
             raise ValueError("Could not obtain direct audio stream URL.")
-        return info['url']
+        return {
+            'url': info['url'],
+            'headers': info.get('http_headers', {}),
+            'title': info.get('title') or 'song',
+            'artist': info.get('artist') or info.get('channel') or info.get('uploader') or 'artist',
+            'duration': info.get('duration') or 0
+        }
+
+def get_direct_audio_url(target_url_or_id):
+    """Get the direct high-speed audio stream link for web player"""
+    info = get_direct_audio_stream_info(target_url_or_id)
+    return info['url']
 
 def generate_mp3_stream(target_url_or_id, bitrate='320k', meta=None):
     """
@@ -201,11 +220,21 @@ def generate_mp3_stream(target_url_or_id, bitrate='320k', meta=None):
             except Exception:
                 pass
 
-    if ffmpeg_bin:
+    stream_info = None
+    try:
+        stream_info = get_direct_audio_stream_info(target)
+    except Exception as e:
+        print(f"Error fetching stream info: {e}")
+
+    if ffmpeg_bin and stream_info:
         try:
-            direct_audio_url = get_direct_audio_url(target)
+            direct_audio_url = stream_info['url']
+            headers = stream_info.get('headers', {})
+            headers_str = ''.join([f"{k}: {v}\r\n" for k, v in headers.items()])
+
             ffmpeg_cmd = [
                 ffmpeg_bin,
+                '-headers', headers_str,
                 '-y',
                 '-i', direct_audio_url,
                 '-vn',
@@ -244,23 +273,20 @@ def generate_mp3_stream(target_url_or_id, bitrate='320k', meta=None):
         except Exception as e:
             print(f"FFmpeg MP3 transcoding exception: {e}, attempting direct stream fallback")
 
-    # Fallback: Stream direct audio chunks
-    try:
-        direct_url = get_direct_audio_url(target)
-        req = urllib.request.Request(
-            direct_url,
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        )
-        with urllib.request.urlopen(req, timeout=30) as upstream:
-            while True:
-                chunk = upstream.read(65536)
-                if not chunk:
-                    break
-                yield chunk
-    except Exception as e:
-        print(f"Direct stream download fallback failed: {e}")
-    except Exception as e:
-        print(f"Direct stream download fallback failed: {e}")
+    # Fallback: Stream direct audio chunks using upstream headers
+    if stream_info:
+        try:
+            direct_url = stream_info['url']
+            headers = stream_info.get('headers', {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+            req = urllib.request.Request(direct_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as upstream:
+                while True:
+                    chunk = upstream.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+        except Exception as e:
+            print(f"Direct stream download fallback failed: {e}")
 
 def clean_lyrics_query(text):
     """Clean video titles, buzzwords, and bracketed tags to improve lyrics search hits"""
