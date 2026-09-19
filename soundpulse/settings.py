@@ -73,10 +73,49 @@ TEMPLATES = [
 WSGI_APPLICATION = 'soundpulse.wsgi.application'
 ASGI_APPLICATION = 'soundpulse.asgi.application'
 
-# Database configuration: Supports MySQL (e.g. phpMyAdmin / XAMPP / MySQL Server) or SQLite fallback
+# Database configuration: Supports DATABASE_URL, MySQL (XAMPP / phpMyAdmin / Cloud MySQL), or SQLite fallback
+DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
 DB_ENGINE = os.getenv('DB_ENGINE', 'sqlite').lower()
 
-if DB_ENGINE == 'mysql':
+if DATABASE_URL:
+    import urllib.parse
+    parsed = urllib.parse.urlparse(DATABASE_URL)
+    scheme = parsed.scheme.lower()
+    
+    if 'mysql' in scheme:
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.mysql',
+                'NAME': parsed.path.lstrip('/'),
+                'USER': urllib.parse.unquote(parsed.username or 'root'),
+                'PASSWORD': urllib.parse.unquote(parsed.password or ''),
+                'HOST': parsed.hostname or 'localhost',
+                'PORT': str(parsed.port or 3306),
+                'OPTIONS': {
+                    'charset': 'utf8mb4',
+                    'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+                }
+            }
+        }
+    elif 'postgres' in scheme:
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': parsed.path.lstrip('/'),
+                'USER': urllib.parse.unquote(parsed.username or 'postgres'),
+                'PASSWORD': urllib.parse.unquote(parsed.password or ''),
+                'HOST': parsed.hostname or 'localhost',
+                'PORT': str(parsed.port or 5432),
+            }
+        }
+    else:
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.sqlite3',
+                'NAME': BASE_DIR / 'db.sqlite3',
+            }
+        }
+elif DB_ENGINE == 'mysql':
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.mysql',
