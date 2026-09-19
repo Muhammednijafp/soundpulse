@@ -166,9 +166,12 @@ def get_direct_audio_url(target_url_or_id):
 
 def generate_mp3_stream(target_url_or_id, bitrate='320k', meta=None):
     """
-    Generator function that runs yt-dlp piped to ffmpeg and yields MP3 binary chunks (64KB)
-    directly into Django's StreamingHttpResponse.
+    Generator function that runs yt-dlp piped to ffmpeg and yields MP3 binary chunks (64KB).
+    Includes automatic fallback to direct audio chunk streaming so downloads never return 0 bytes.
     """
+    import sys
+    import shutil
+    
     target = target_url_or_id.strip()
     if not target.startswith('http://') and not target.startswith('https://'):
         target = f"https://www.youtube.com/watch?v={target}"
@@ -179,61 +182,89 @@ def generate_mp3_stream(target_url_or_id, bitrate='320k', meta=None):
     title = meta.get('title', 'Audio Track') if meta else 'Audio Track'
     artist = meta.get('artist', 'Unknown Artist') if meta else 'Unknown Artist'
 
-    # 1. Start yt-dlp subprocess piping raw audio to stdout
-    ytdlp_cmd = [
-        'python', '-m', 'yt_dlp',
-        '-o', '-',
-        '-f', 'bestaudio[ext=m4a]/bestaudio/best',
-        '--no-warnings',
-        target
-    ]
-    
-    # 2. Start ffmpeg subprocess reading from stdin and outputting MP3 to stdout
-    ffmpeg_cmd = [
-        'ffmpeg',
-        '-i', 'pipe:0',
-        '-vn',
-        '-acodec', 'libmp3lame',
-        '-ab', audio_bitrate,
-        '-ar', '44100',
-        '-id3v2_version', '3',
-        '-metadata', f"title={title}",
-        '-metadata', f"artist={artist}",
-        '-f', 'mp3',
-        'pipe:1'
-    ]
-
-    p_ytdlp = subprocess.Popen(
-        ytdlp_cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL
-    )
-
-    p_ffmpeg = subprocess.Popen(
-        ffmpeg_cmd,
-        stdin=p_ytdlp.stdout,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL
-    )
-
-    # Allow p_ytdlp to receive SIGPIPE if p_ffmpeg exits
-    p_ytdlp.stdout.close()
-
-    try:
-        while True:
-            chunk = p_ffmpeg.stdout.read(65536)  # 64 KB chunks
-            if not chunk:
-                break
-            yield chunk
-    finally:
-        # Cleanup child processes
+    ffmpeg_path = shutil.which('ffmpeg')
+    has_ffmpeg = False
+    if ffmpeg_path:
         try:
-            if p_ffmpeg.poll() is None:
-                p_ffmpeg.kill()
-            if p_ytdlp.poll() is None:
-                p_ytdlp.kill()
+            res = subprocess.run([ffmpeg_path, '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            if res.returncode == 0:
+                has_ffmpeg = True
         except Exception:
-            pass
+            has_ffmpeg = False
+
+    if has_ffmpeg:
+        ytdlp_cmd = [
+            sys.executable, '-m', 'yt_dlp',
+            '-o', '-',
+            '-f', 'bestaudio[ext=m4a]/bestaudio/best',
+            '--no-warnings',
+            target
+        ]
+        
+        ffmpeg_cmd = [
+            ffmpeg_path,
+            '-i', 'pipe:0',
+            '-vn',
+            '-acodec', 'libmp3lame',
+            '-ab', audio_bitrate,
+            '-ar', '44100',
+            '-id3v2_version', '3',
+            '-metadata', f"title={title}",
+            '-metadata', f"artist={artist}",
+            '-f', 'mp3',
+            'pipe:1'
+        ]
+
+        try:
+            p_ytdlp = subprocess.Popen(
+                ytdlp_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL
+            )
+            p_ffmpeg = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=p_ytdlp.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL
+            )
+            p_ytdlp.stdout.close()
+
+            bytes_yielded = 0
+            while True:
+                chunk = p_ffmpeg.stdout.read(65536)
+                if not chunk:
+                    break
+                bytes_yielded += len(chunk)
+                yield chunk
+
+            try:
+                if p_ffmpeg.poll() is None:
+                    p_ffmpeg.kill()
+                if p_ytdlp.poll() is None:
+                    p_ytdlp.kill()
+            except Exception:
+                pass
+
+            if bytes_yielded > 0:
+                return
+        except Exception as e:
+            print(f"FFmpeg transcode exception: {e}, using direct fallback")
+
+    # Fallback: Stream directly from YouTube direct audio URL
+    try:
+        direct_url = get_direct_audio_url(target)
+        req = urllib.request.Request(
+            direct_url,
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        )
+        with urllib.request.urlopen(req, timeout=30) as upstream:
+            while True:
+                chunk = upstream.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+    except Exception as e:
+        print(f"Direct stream download fallback failed: {e}")
 
 def clean_lyrics_query(text):
     """Clean video titles, buzzwords, and bracketed tags to improve lyrics search hits"""

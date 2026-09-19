@@ -110,7 +110,7 @@ class TrackInfoAPIView(APIView):
         return self.post(request)
 
 class StreamAudioAPIView(APIView):
-    """Get direct audio stream URL and redirect web audio player natively"""
+    """Direct high-performance audio streaming with support for Range and smooth web playback"""
     def get(self, request):
         url_or_id = request.query_params.get('id') or request.query_params.get('url')
         if not url_or_id:
@@ -121,12 +121,50 @@ class StreamAudioAPIView(APIView):
 
         try:
             direct_url = get_direct_audio_url(url_or_id)
-            return HttpResponseRedirect(direct_url)
-        except Exception as e:
-            return Response(
-                {'success': False, 'error': str(e) or 'Unable to stream audio.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            req = urllib.request.Request(
+                direct_url,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': '*/*',
+                }
             )
+            range_header = request.headers.get('Range')
+            if range_header:
+                req.add_header('Range', range_header)
+
+            upstream = urllib.request.urlopen(req, timeout=30)
+            content_type = upstream.headers.get('Content-Type', 'audio/mp4')
+            content_length = upstream.headers.get('Content-Length')
+            content_range = upstream.headers.get('Content-Range')
+
+            def chunk_generator():
+                try:
+                    while True:
+                        chunk = upstream.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    upstream.close()
+
+            status_code = 206 if range_header and content_range else 200
+            response = StreamingHttpResponse(chunk_generator(), status=status_code, content_type=content_type)
+            response['Accept-Ranges'] = 'bytes'
+            if content_length:
+                response['Content-Length'] = content_length
+            if content_range:
+                response['Content-Range'] = content_range
+            response['Cache-Control'] = 'no-cache'
+            return response
+        except Exception as e:
+            try:
+                direct_url = get_direct_audio_url(url_or_id)
+                return HttpResponseRedirect(direct_url)
+            except Exception as e2:
+                return Response(
+                    {'success': False, 'error': str(e2) or 'Unable to stream audio.'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
 class DownloadMp3APIView(APIView):
     """Transcode and stream high-quality MP3 attachment directly to device Downloads folder"""
