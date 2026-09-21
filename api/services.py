@@ -110,6 +110,11 @@ def get_track_info(target_url_or_id):
         'noplaylist': True,
         'ignoreerrors': True,
         'skip_download': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'android', 'web_safari']
+            }
+        }
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -148,7 +153,7 @@ def get_track_info(target_url_or_id):
 def get_direct_audio_stream_info(target_url_or_id):
     """
     Extract the direct audio stream URL and required HTTP headers using multi-client extractors
-    (Android, iOS, Web, MWeb) to prevent datacenter 403 Forbidden blocks.
+    (iOS, Android, Web Safari) to bypass datacenter IP bot challenges.
     """
     target = target_url_or_id.strip()
     if not target.startswith('http://') and not target.startswith('https://'):
@@ -161,7 +166,7 @@ def get_direct_audio_stream_info(target_url_or_id):
         'skip_download': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios', 'web', 'mweb']
+                'player_client': ['ios', 'android', 'web_safari']
             }
         }
     }
@@ -218,6 +223,11 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
         'outtmpl': outtmpl,
         'quiet': True,
         'no_warnings': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'android', 'web_safari']
+            }
+        },
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
