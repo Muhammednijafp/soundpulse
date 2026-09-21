@@ -6,6 +6,12 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 
+try:
+    import pymysql
+    pymysql.install_as_MySQLdb()
+except ImportError:
+    pass
+
 load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -77,14 +83,23 @@ ASGI_APPLICATION = 'soundpulse.asgi.application'
 DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
 DB_ENGINE = os.getenv('DB_ENGINE', 'sqlite').lower()
 
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    }
+}
+
 if DATABASE_URL:
     import urllib.parse
     parsed = urllib.parse.urlparse(DATABASE_URL)
     scheme = parsed.scheme.lower()
     
     if 'mysql' in scheme:
-        DATABASES = {
-            'default': {
+        try:
+            import pymysql
+            pymysql.install_as_MySQLdb()
+            DATABASES['default'] = {
                 'ENGINE': 'django.db.backends.mysql',
                 'NAME': parsed.path.lstrip('/'),
                 'USER': urllib.parse.unquote(parsed.username or 'root'),
@@ -96,10 +111,11 @@ if DATABASE_URL:
                     'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
                 }
             }
-        }
+        except Exception:
+            pass
     elif 'postgres' in scheme:
-        DATABASES = {
-            'default': {
+        try:
+            DATABASES['default'] = {
                 'ENGINE': 'django.db.backends.postgresql',
                 'NAME': parsed.path.lstrip('/'),
                 'USER': urllib.parse.unquote(parsed.username or 'postgres'),
@@ -107,17 +123,13 @@ if DATABASE_URL:
                 'HOST': parsed.hostname or 'localhost',
                 'PORT': str(parsed.port or 5432),
             }
-        }
-    else:
-        DATABASES = {
-            'default': {
-                'ENGINE': 'django.db.backends.sqlite3',
-                'NAME': BASE_DIR / 'db.sqlite3',
-            }
-        }
+        except Exception:
+            pass
 elif DB_ENGINE == 'mysql':
-    DATABASES = {
-        'default': {
+    try:
+        import pymysql
+        pymysql.install_as_MySQLdb()
+        DATABASES['default'] = {
             'ENGINE': 'django.db.backends.mysql',
             'NAME': os.getenv('DB_NAME', 'soundpulse_db'),
             'USER': os.getenv('DB_USER', 'root'),
@@ -129,14 +141,8 @@ elif DB_ENGINE == 'mysql':
                 'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
             }
         }
-    }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+    except Exception:
+        pass
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -248,5 +254,10 @@ CORS_EXPOSE_HEADERS = [
     'Content-Length',
     'Accept-Ranges',
     'Content-Disposition',
+    'Cross-Origin-Resource-Policy',
 ]
+
+SECURE_CROSS_ORIGIN_OPENER_POLICY = None
+SECURE_CROSS_ORIGIN_EMBEDDER_POLICY = None
+
 

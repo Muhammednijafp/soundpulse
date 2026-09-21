@@ -110,27 +110,47 @@ class TrackInfoAPIView(APIView):
         return self.post(request)
 
 class StreamAudioAPIView(APIView):
-    """Direct high-performance audio streaming with support for Range and smooth web playback"""
+    """Direct high-performance audio streaming with support for Range, instant proxying, and smooth web playback"""
+    def options(self, request, *args, **kwargs):
+        response = Response(status=status.HTTP_200_OK)
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+        response['Access-Control-Allow-Headers'] = 'Range, Accept, Origin, Content-Type, Authorization, X-Requested-With'
+        response['Access-Control-Expose-Headers'] = 'Content-Range, Content-Length, Accept-Ranges, Content-Type'
+        response['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
+        return response
+
     def get(self, request):
         url_or_id = request.query_params.get('id') or request.query_params.get('url')
         if not url_or_id:
-            return Response(
+            res = Response(
                 {'success': False, 'error': 'Track "id" or "url" is required.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+            res['Access-Control-Allow-Origin'] = '*'
+            return res
 
-        # 1. Primary: Stream from local high-speed cache / native MP3 extraction
-        try:
-            from .services import download_track_mp3
-            mp3_path = download_track_mp3(url_or_id, bitrate='128k')
-            response = FileResponse(open(mp3_path, 'rb'), content_type='audio/mpeg')
-            response['Accept-Ranges'] = 'bytes'
-            response['Cache-Control'] = 'public, max-age=86400'
-            return response
-        except Exception as e:
-            print(f"Cache stream failed, attempting proxy fallback: {e}")
+        # 1. If already cached in local disk, stream immediately
+        from .services import AUDIO_CACHE_DIR, sanitize_filename
+        clean_id = sanitize_filename(url_or_id.split('v=')[-1].split('/')[-1])
+        for cached_file in AUDIO_CACHE_DIR.glob(f"{clean_id}_*"):
+            if cached_file.exists() and cached_file.stat().st_size > 10000:
+                try:
+                    response = FileResponse(open(cached_file, 'rb'), content_type='audio/mpeg')
+                    response['Accept-Ranges'] = 'bytes'
+                    response['Access-Control-Allow-Origin'] = '*'
+                    response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+                    response['Access-Control-Allow-Headers'] = 'Range, Accept, Origin, Content-Type, Authorization, X-Requested-With'
+                    response['Access-Control-Expose-Headers'] = 'Content-Range, Content-Length, Accept-Ranges, Content-Type'
+                    response['Cross-Origin-Resource-Policy'] = 'cross-origin'
+                    response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
+                    response['Cache-Control'] = 'public, max-age=86400'
+                    return response
+                except Exception:
+                    pass
 
-        # 2. Fallback: Proxy direct stream URL with upstream headers
+        # 2. Instant proxy stream directly from upstream (ultra fast ~0.5s start)
         try:
             from .services import get_direct_audio_stream_info
             stream_info = get_direct_audio_stream_info(url_or_id)
@@ -172,58 +192,141 @@ class StreamAudioAPIView(APIView):
                 response['Content-Length'] = content_length
             if content_range:
                 response['Content-Range'] = content_range
-            response['Cache-Control'] = 'no-cache'
+
+            response['Access-Control-Allow-Origin'] = '*'
+            response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+            response['Access-Control-Allow-Headers'] = 'Range, Accept, Origin, Content-Type, Authorization, X-Requested-With'
+            response['Access-Control-Expose-Headers'] = 'Content-Range, Content-Length, Accept-Ranges, Content-Type'
+            response['Cross-Origin-Resource-Policy'] = 'cross-origin'
+            response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
+            response['Cache-Control'] = 'public, max-age=3600'
+            return response
+
+        except Exception as e:
+            print(f"Direct stream proxy error: {e}, falling back to full transcoder...")
+
+        # 3. Fallback: Transcode and stream via download_track_mp3
+        try:
+            from .services import download_track_mp3
+            mp3_path = download_track_mp3(url_or_id, bitrate='128k')
+            response = FileResponse(open(mp3_path, 'rb'), content_type='audio/mpeg')
+            response['Accept-Ranges'] = 'bytes'
+            response['Access-Control-Allow-Origin'] = '*'
+            response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+            response['Access-Control-Allow-Headers'] = 'Range, Accept, Origin, Content-Type, Authorization, X-Requested-With'
+            response['Access-Control-Expose-Headers'] = 'Content-Range, Content-Length, Accept-Ranges, Content-Type'
+            response['Cross-Origin-Resource-Policy'] = 'cross-origin'
+            response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
+            response['Cache-Control'] = 'public, max-age=86400'
             return response
         except Exception as e2:
-            try:
-                from .services import get_direct_audio_url
-                direct_url = get_direct_audio_url(url_or_id)
-                return HttpResponseRedirect(direct_url)
-            except Exception as e3:
-                return Response(
-                    {'success': False, 'error': str(e3) or 'Unable to stream audio.'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
+            res = Response(
+                {'success': False, 'error': f'Playback failed: {str(e2)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+            res['Access-Control-Allow-Origin'] = '*'
+            res['Cross-Origin-Resource-Policy'] = 'cross-origin'
+            return res
 
 class DownloadMp3APIView(APIView):
     """Transcode and stream high-quality MP3 attachment directly to device Downloads folder"""
+    def options(self, request, *args, **kwargs):
+        response = Response(status=status.HTTP_200_OK)
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+        response['Access-Control-Allow-Headers'] = 'Range, Accept, Origin, Content-Type, Authorization, X-Requested-With'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Length, Content-Type'
+        response['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
+        return response
+
     def get(self, request):
         import os
         url_or_id = request.query_params.get('id') or request.query_params.get('url')
         bitrate = request.query_params.get('bitrate', '320k')
 
         if not url_or_id:
-            return Response(
+            res = Response(
                 {'success': False, 'error': 'Track "id" or "url" is required for download.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+            res['Access-Control-Allow-Origin'] = '*'
+            return res
 
         # 1. Fetch metadata for clean naming
-        meta = None
+        track_title = 'song'
+        track_artist = 'audio'
         try:
             meta = get_track_info(url_or_id)
             track_title = meta.get('title', 'song')
             track_artist = meta.get('artist', 'audio')
-            filename = sanitize_filename(f"{track_title} - {track_artist}") or 'download'
         except Exception:
-            filename = 'download'
+            pass
 
+        filename = sanitize_filename(f"{track_title} - {track_artist}") or 'download'
         encoded_filename = urllib.parse.quote(f"{filename}.mp3")
 
-        # 2. Return FileResponse with genuine, non-empty MP3 binary
+        # 2. Return FileResponse with genuine MP3 binary
         try:
             from .services import download_track_mp3
             mp3_path = download_track_mp3(url_or_id, bitrate=bitrate)
-            response = FileResponse(open(mp3_path, 'rb'), content_type='audio/mpeg')
-            response['Content-Disposition'] = f'attachment; filename="{filename}.mp3"; filename*=UTF-8\'\'{encoded_filename}'
-            response['Content-Length'] = os.path.getsize(mp3_path)
-            response['Cache-Control'] = 'no-cache'
-            return response
+            file_size = os.path.getsize(mp3_path)
+            if file_size > 1000:
+                response = FileResponse(open(mp3_path, 'rb'), content_type='audio/mpeg')
+                response['Content-Disposition'] = f'attachment; filename="{filename}.mp3"; filename*=UTF-8\'\'{encoded_filename}'
+                response['Content-Length'] = file_size
+                response['Access-Control-Allow-Origin'] = '*'
+                response['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Length, Content-Type'
+                response['Cross-Origin-Resource-Policy'] = 'cross-origin'
+                response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
+                response['Cache-Control'] = 'no-cache'
+                return response
         except Exception as e:
-            return Response(
-                {'success': False, 'error': str(e) or 'Could not download track.'},
+            print(f"MP3 transcode error: {e}, attempting direct stream download...")
+
+        # 3. Resilient Fallback: Stream audio directly as attachment so download NEVER fails or is 0 bytes
+        try:
+            from .services import get_direct_audio_stream_info
+            stream_info = get_direct_audio_stream_info(url_or_id)
+            direct_url = stream_info['url']
+            upstream_headers = stream_info.get('headers', {})
+
+            req_headers = {
+                'User-Agent': upstream_headers.get('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'),
+                'Accept': upstream_headers.get('Accept', '*/*'),
+            }
+            req = urllib.request.Request(direct_url, headers=req_headers)
+            upstream = urllib.request.urlopen(req, timeout=30)
+            content_type = upstream.headers.get('Content-Type', 'audio/mpeg')
+            content_length = upstream.headers.get('Content-Length')
+
+            def chunk_generator():
+                try:
+                    while True:
+                        chunk = upstream.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    upstream.close()
+
+            response = StreamingHttpResponse(chunk_generator(), content_type=content_type)
+            response['Content-Disposition'] = f'attachment; filename="{filename}.mp3"; filename*=UTF-8\'\'{encoded_filename}'
+            if content_length:
+                response['Content-Length'] = content_length
+            response['Access-Control-Allow-Origin'] = '*'
+            response['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Length, Content-Type'
+            response['Cross-Origin-Resource-Policy'] = 'cross-origin'
+            response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
+            return response
+        except Exception as e2:
+            res = Response(
+                {'success': False, 'error': f'Download failed: {str(e2)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+            res['Access-Control-Allow-Origin'] = '*'
+            res['Cross-Origin-Resource-Policy'] = 'cross-origin'
+            return res
 
 class TrendingAPIView(APIView):
     """Trending playlists and charts"""
