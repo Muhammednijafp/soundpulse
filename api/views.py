@@ -10,7 +10,7 @@ from .services import (
     search_tracks,
     get_track_info,
     get_direct_audio_url,
-    generate_mp3_stream,
+    download_track_mp3,
     sanitize_filename,
     get_song_lyrics,
     get_local_network_info,
@@ -119,6 +119,18 @@ class StreamAudioAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # 1. Primary: Stream from local high-speed cache / native MP3 extraction
+        try:
+            from .services import download_track_mp3
+            mp3_path = download_track_mp3(url_or_id, bitrate='128k')
+            response = FileResponse(open(mp3_path, 'rb'), content_type='audio/mpeg')
+            response['Accept-Ranges'] = 'bytes'
+            response['Cache-Control'] = 'public, max-age=86400'
+            return response
+        except Exception as e:
+            print(f"Cache stream failed, attempting proxy fallback: {e}")
+
+        # 2. Fallback: Proxy direct stream URL with upstream headers
         try:
             from .services import get_direct_audio_stream_info
             stream_info = get_direct_audio_stream_info(url_or_id)
@@ -162,19 +174,21 @@ class StreamAudioAPIView(APIView):
                 response['Content-Range'] = content_range
             response['Cache-Control'] = 'no-cache'
             return response
-        except Exception as e:
+        except Exception as e2:
             try:
+                from .services import get_direct_audio_url
                 direct_url = get_direct_audio_url(url_or_id)
                 return HttpResponseRedirect(direct_url)
-            except Exception as e2:
+            except Exception as e3:
                 return Response(
-                    {'success': False, 'error': str(e2) or 'Unable to stream audio.'},
+                    {'success': False, 'error': str(e3) or 'Unable to stream audio.'},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
 
 class DownloadMp3APIView(APIView):
     """Transcode and stream high-quality MP3 attachment directly to device Downloads folder"""
     def get(self, request):
+        import os
         url_or_id = request.query_params.get('id') or request.query_params.get('url')
         bitrate = request.query_params.get('bitrate', '320k')
 
@@ -196,14 +210,20 @@ class DownloadMp3APIView(APIView):
 
         encoded_filename = urllib.parse.quote(f"{filename}.mp3")
 
-        # 2. Return StreamingHttpResponse with MP3 binary generator
-        response = StreamingHttpResponse(
-            generate_mp3_stream(url_or_id, bitrate=bitrate, meta=meta),
-            content_type='audio/mpeg'
-        )
-        response['Content-Disposition'] = f'attachment; filename="{filename}.mp3"; filename*=UTF-8\'\'{encoded_filename}'
-        response['Cache-Control'] = 'no-cache'
-        return response
+        # 2. Return FileResponse with genuine, non-empty MP3 binary
+        try:
+            from .services import download_track_mp3
+            mp3_path = download_track_mp3(url_or_id, bitrate=bitrate)
+            response = FileResponse(open(mp3_path, 'rb'), content_type='audio/mpeg')
+            response['Content-Disposition'] = f'attachment; filename="{filename}.mp3"; filename*=UTF-8\'\'{encoded_filename}'
+            response['Content-Length'] = os.path.getsize(mp3_path)
+            response['Cache-Control'] = 'no-cache'
+            return response
+        except Exception as e:
+            return Response(
+                {'success': False, 'error': str(e) or 'Could not download track.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class TrendingAPIView(APIView):
     """Trending playlists and charts"""

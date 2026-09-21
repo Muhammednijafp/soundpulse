@@ -183,110 +183,62 @@ def get_direct_audio_url(target_url_or_id):
     info = get_direct_audio_stream_info(target_url_or_id)
     return info['url']
 
-def generate_mp3_stream(target_url_or_id, bitrate='320k', meta=None):
+import tempfile
+from pathlib import Path
+
+AUDIO_CACHE_DIR = Path(tempfile.gettempdir()) / 'soundpulse_cache'
+AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+def download_track_mp3(target_url_or_id, bitrate='320k'):
     """
-    Generator function that transcodes source audio to genuine MP3 (MPEG Layer-3) with ID3v2 tags.
-    Uses imageio_ffmpeg bundled binary (or system ffmpeg) to ensure 100% compatibility with
-    Windows Media Player, Groove Music, iPhone, Android, and car stereos.
+    Downloads and converts track to genuine 320k MP3 using yt-dlp native engine.
+    Caches the file locally for ultra-fast repeated streaming and downloading.
     """
-    import sys
-    import shutil
+    clean_id = sanitize_filename(target_url_or_id.split('v=')[-1].split('/')[-1])
+    mp3_path = AUDIO_CACHE_DIR / f"{clean_id}_{bitrate}.mp3"
+    
+    if mp3_path.exists() and mp3_path.stat().st_size > 10000:
+        return str(mp3_path)
     
     target = target_url_or_id.strip()
     if not target.startswith('http://') and not target.startswith('https://'):
         target = f"https://www.youtube.com/watch?v={target}"
-
-    valid_bitrates = {'128k', '192k', '256k', '320k'}
-    audio_bitrate = bitrate if bitrate in valid_bitrates else '320k'
-
-    title = meta.get('title', 'Audio Track') if meta else 'Audio Track'
-    artist = meta.get('artist', 'Unknown Artist') if meta else 'Unknown Artist'
-
-    # 1. Discover working FFmpeg binary
+        
     ffmpeg_bin = None
     try:
         import imageio_ffmpeg
         ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
     except Exception:
         pass
-
-    if not ffmpeg_bin:
-        sys_ffmpeg = shutil.which('ffmpeg')
-        if sys_ffmpeg:
-            try:
-                res = subprocess.run([sys_ffmpeg, '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-                if res.returncode == 0:
-                    ffmpeg_bin = sys_ffmpeg
-            except Exception:
-                pass
-
-    stream_info = None
-    try:
-        stream_info = get_direct_audio_stream_info(target)
-    except Exception as e:
-        print(f"Error fetching stream info: {e}")
-
-    if ffmpeg_bin and stream_info:
-        try:
-            direct_audio_url = stream_info['url']
-            headers = stream_info.get('headers', {})
-            headers_str = ''.join([f"{k}: {v}\r\n" for k, v in headers.items()])
-
-            ffmpeg_cmd = [
-                ffmpeg_bin,
-                '-headers', headers_str,
-                '-y',
-                '-i', direct_audio_url,
-                '-vn',
-                '-acodec', 'libmp3lame',
-                '-b:a', audio_bitrate,
-                '-ar', '44100',
-                '-id3v2_version', '3',
-                '-metadata', f"title={title}",
-                '-metadata', f"artist={artist}",
-                '-f', 'mp3',
-                'pipe:1'
-            ]
-
-            p_ffmpeg = subprocess.Popen(
-                ffmpeg_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL
-            )
-
-            bytes_yielded = 0
-            while True:
-                chunk = p_ffmpeg.stdout.read(65536)
-                if not chunk:
-                    break
-                bytes_yielded += len(chunk)
-                yield chunk
-
-            try:
-                if p_ffmpeg.poll() is None:
-                    p_ffmpeg.kill()
-            except Exception:
-                pass
-
-            if bytes_yielded > 0:
-                return
-        except Exception as e:
-            print(f"FFmpeg MP3 transcoding exception: {e}, attempting direct stream fallback")
-
-    # Fallback: Stream direct audio chunks using upstream headers
-    if stream_info:
-        try:
-            direct_url = stream_info['url']
-            headers = stream_info.get('headers', {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-            req = urllib.request.Request(direct_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as upstream:
-                while True:
-                    chunk = upstream.read(65536)
-                    if not chunk:
-                        break
-                    yield chunk
-        except Exception as e:
-            print(f"Direct stream download fallback failed: {e}")
+        
+    outtmpl = str(AUDIO_CACHE_DIR / f"{clean_id}_{bitrate}.%(ext)s")
+    
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': outtmpl,
+        'quiet': True,
+        'no_warnings': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': bitrate.replace('k', ''),
+        }],
+    }
+    if ffmpeg_bin:
+        ydl_opts['ffmpeg_location'] = ffmpeg_bin
+        
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([target])
+        
+    if mp3_path.exists() and mp3_path.stat().st_size > 0:
+        return str(mp3_path)
+        
+    # Check for any created audio file in cache matching this id
+    for f in AUDIO_CACHE_DIR.glob(f"{clean_id}_{bitrate}.*"):
+        if f.stat().st_size > 0:
+            return str(f)
+            
+    raise RuntimeError(f"Could not extract audio for track: {target_url_or_id}")
 
 def clean_lyrics_query(text):
     """Clean video titles, buzzwords, and bracketed tags to improve lyrics search hits"""
