@@ -98,6 +98,20 @@ def search_tracks(query, limit=15):
 
     return tracks
 
+# Check for optional YouTube cookies in environment variables
+COOKIES_FILE = None
+_cookies_env = os.getenv('YOUTUBE_COOKIES', '').strip()
+if _cookies_env:
+    if os.path.exists(_cookies_env):
+        COOKIES_FILE = _cookies_env
+    else:
+        try:
+            _cookie_tmp = Path(tempfile.gettempdir()) / 'yt_cookies.txt'
+            _cookie_tmp.write_text(_cookies_env, encoding='utf-8')
+            COOKIES_FILE = str(_cookie_tmp)
+        except Exception:
+            pass
+
 def get_track_info(target_url_or_id):
     """Extract full track metadata for any video ID or URL"""
     target = target_url_or_id.strip()
@@ -112,10 +126,12 @@ def get_track_info(target_url_or_id):
         'skip_download': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'android', 'web_safari']
+                'player_client': ['android_vr', 'tv_downgraded', 'web_safari', 'android']
             }
         }
     }
+    if COOKIES_FILE:
+        ydl_opts['cookiefile'] = COOKIES_FILE
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(target, download=False)
@@ -153,7 +169,7 @@ def get_track_info(target_url_or_id):
 def get_direct_audio_stream_info(target_url_or_id):
     """
     Extract the direct audio stream URL and required HTTP headers using multi-client extractors
-    (iOS, Android, Web Safari) to bypass datacenter IP bot challenges.
+    (Android VR, TV, Web Safari, Android) to bypass datacenter IP bot challenges.
     """
     target = target_url_or_id.strip()
     if not target.startswith('http://') and not target.startswith('https://'):
@@ -166,10 +182,12 @@ def get_direct_audio_stream_info(target_url_or_id):
         'skip_download': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'android', 'web_safari']
+                'player_client': ['android_vr', 'tv_downgraded', 'web_safari', 'android']
             }
         }
     }
+    if COOKIES_FILE:
+        ydl_opts['cookiefile'] = COOKIES_FILE
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(target, download=False)
@@ -225,7 +243,7 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
         'no_warnings': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'android', 'web_safari']
+                'player_client': ['android_vr', 'tv_downgraded', 'web_safari', 'android']
             }
         },
         'postprocessors': [{
@@ -236,6 +254,8 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
     }
     if ffmpeg_bin:
         ydl_opts['ffmpeg_location'] = ffmpeg_bin
+    if COOKIES_FILE:
+        ydl_opts['cookiefile'] = COOKIES_FILE
         
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([target])
