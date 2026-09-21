@@ -13,6 +13,7 @@ from .views import (
 )
 
 urlpatterns = [
+    re_path(r'^$', HealthCheckAPIView.as_view(), name='api-root'),
     re_path(r'^health/?$', HealthCheckAPIView.as_view(), name='health'),
     re_path(r'^search/?$', SearchAPIView.as_view(), name='search'),
     re_path(r'^info/?$', TrackInfoAPIView.as_view(), name='info'),
