@@ -124,7 +124,7 @@ def get_track_info(target_url_or_id):
         'noplaylist': True,
         'ignoreerrors': True,
         'skip_download': True,
-        'js_runtimes': {'node': {}},
+        'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
     }
     if COOKIES_FILE:
         ydl_opts['cookiefile'] = COOKIES_FILE
@@ -175,7 +175,7 @@ def get_direct_audio_stream_info(target_url_or_id):
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
-        'js_runtimes': {'node': {}},
+        'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
     }
     if COOKIES_FILE:
         ydl_opts['cookiefile'] = COOKIES_FILE
@@ -244,7 +244,7 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
         'outtmpl': outtmpl,
         'quiet': True,
         'no_warnings': True,
-        'js_runtimes': {'node': {}},
+        'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
