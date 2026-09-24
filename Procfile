@@ -1,2 +1,2 @@
-web: PATH="$HOME/.deno/bin:$PATH" gunicorn soundpulse.wsgi:application --bind 0.0.0.0:$PORT
+web: gunicorn soundpulse.wsgi:application --bind 0.0.0.0:$PORT --timeout 180 --threads 4
 
