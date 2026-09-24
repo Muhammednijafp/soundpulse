@@ -124,11 +124,7 @@ def get_track_info(target_url_or_id):
         'noplaylist': True,
         'ignoreerrors': True,
         'skip_download': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android_vr', 'tv_downgraded', 'web_safari', 'android']
-            }
-        }
+        'js_runtimes': {'node': {}},
     }
     if COOKIES_FILE:
         ydl_opts['cookiefile'] = COOKIES_FILE
@@ -168,8 +164,7 @@ def get_track_info(target_url_or_id):
 
 def get_direct_audio_stream_info(target_url_or_id):
     """
-    Extract the direct audio stream URL and required HTTP headers using multi-client extractors
-    (Android VR, TV, Web Safari, Android) to bypass datacenter IP bot challenges.
+    Extract the direct audio stream URL and required HTTP headers
     """
     target = target_url_or_id.strip()
     if not target.startswith('http://') and not target.startswith('https://'):
@@ -180,21 +175,29 @@ def get_direct_audio_stream_info(target_url_or_id):
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android_vr', 'tv_downgraded', 'web_safari', 'android']
-            }
-        }
+        'js_runtimes': {'node': {}},
     }
     if COOKIES_FILE:
         ydl_opts['cookiefile'] = COOKIES_FILE
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(target, download=False)
-        if not info or 'url' not in info:
+        if not info:
             raise ValueError("Could not obtain direct audio stream URL.")
+            
+        # Select best audio stream url
+        url = info.get('url')
+        if not url and info.get('formats'):
+            audio_fmts = [f for f in info['formats'] if f.get('acodec') != 'none' and f.get('url')]
+            if audio_fmts:
+                audio_fmts.sort(key=lambda x: x.get('abr') or 0, reverse=True)
+                url = audio_fmts[0].get('url')
+                
+        if not url:
+            raise ValueError("Could not obtain direct audio stream URL.")
+            
         return {
-            'url': info['url'],
+            'url': url,
             'headers': info.get('http_headers', {}),
             'title': info.get('title') or 'song',
             'artist': info.get('artist') or info.get('channel') or info.get('uploader') or 'artist',
@@ -241,11 +244,7 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
         'outtmpl': outtmpl,
         'quiet': True,
         'no_warnings': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android_vr', 'tv_downgraded', 'web_safari', 'android']
-            }
-        },
+        'js_runtimes': {'node': {}},
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
