@@ -98,19 +98,26 @@ def search_tracks(query, limit=15):
 
     return tracks
 
-# Check for optional YouTube cookies in environment variables
-COOKIES_FILE = None
-_cookies_env = os.getenv('YOUTUBE_COOKIES', '').strip()
-if _cookies_env:
-    if os.path.exists(_cookies_env):
-        COOKIES_FILE = _cookies_env
-    else:
-        try:
-            _cookie_tmp = Path(tempfile.gettempdir()) / 'yt_cookies.txt'
-            _cookie_tmp.write_text(_cookies_env, encoding='utf-8')
-            COOKIES_FILE = str(_cookie_tmp)
-        except Exception:
-            pass
+def get_cookie_file():
+    """Dynamically parse and format Netscape cookie file from environment variable"""
+    cookies_env = os.getenv('YOUTUBE_COOKIES', '').strip()
+    if not cookies_env:
+        return None
+
+    if os.path.exists(cookies_env):
+        return cookies_env
+
+    try:
+        raw_content = cookies_env.replace('\\n', '\n').replace('\\t', '\t')
+        if '# Netscape' not in raw_content:
+            raw_content = "# Netscape HTTP Cookie File\n# http://curl.haxx.se/rfc/cookie_spec.html\n" + raw_content
+
+        cookie_tmp = Path(tempfile.gettempdir()) / 'yt_cookies.txt'
+        cookie_tmp.write_text(raw_content, encoding='utf-8')
+        return str(cookie_tmp)
+    except Exception as e:
+        print(f"Error preparing cookie file: {e}")
+        return None
 
 def get_track_info(target_url_or_id):
     """Extract full track metadata for any video ID or URL"""
@@ -126,8 +133,9 @@ def get_track_info(target_url_or_id):
         'skip_download': True,
         'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
     }
-    if COOKIES_FILE:
-        ydl_opts['cookiefile'] = COOKIES_FILE
+    cookie_file = get_cookie_file()
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(target, download=False)
@@ -177,8 +185,9 @@ def get_direct_audio_stream_info(target_url_or_id):
         'skip_download': True,
         'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
     }
-    if COOKIES_FILE:
-        ydl_opts['cookiefile'] = COOKIES_FILE
+    cookie_file = get_cookie_file()
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(target, download=False)
@@ -253,8 +262,9 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
     }
     if ffmpeg_bin:
         ydl_opts['ffmpeg_location'] = ffmpeg_bin
-    if COOKIES_FILE:
-        ydl_opts['cookiefile'] = COOKIES_FILE
+    cookie_file = get_cookie_file()
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
         
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([target])
