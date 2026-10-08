@@ -1,7 +1,8 @@
-# Server Secrets
+# Server Secrets (local only — Render uses dashboard env vars)
 .env
 .env.*
 *.env
+!.env.example
 db.sqlite3
 *.sqlite3
 __pycache__/

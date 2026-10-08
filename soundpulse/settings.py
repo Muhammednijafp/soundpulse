@@ -20,9 +20,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-soundpulse-mp3-hub-secret-key-2026')
 
-DEBUG = os.getenv('DEBUG', 'True').lower() in ('true', '1', 'yes')
+DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
 ALLOWED_HOSTS = [host.strip() for host in os.getenv('ALLOWED_HOSTS', '*').split(',') if host.strip()]
+
+# Render free tier: auto-allow the external hostname Render injects
+RENDER_HOSTNAME = os.getenv('RENDER_EXTERNAL_HOSTNAME', '').strip()
+if RENDER_HOSTNAME and RENDER_HOSTNAME not in ALLOWED_HOSTS and '*' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(RENDER_HOSTNAME)
+
+# Behind Render/Vercel HTTPS proxies
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
 
 # Application definition
 INSTALLED_APPS = [
@@ -173,6 +182,16 @@ STATICFILES_DIRS = [
     BASE_DIR.parent / 'client' / 'dist',
 ] if (BASE_DIR.parent / 'client' / 'dist').exists() else []
 
+# WhiteNoise compressed static storage (safe even when WhiteNoise missing locally)
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
+    },
+}
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Django REST Framework Settings
@@ -188,6 +207,8 @@ REST_FRAMEWORK = {
 }
 
 # CORS Configuration
+# Keep permissive by default so Vercel preview URLs never get blocked.
+# Set CORS_ALLOW_ALL_ORIGINS=False in Render env if you want strict allow-list.
 CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'True').lower() in ('true', '1', 'yes')
 CORS_ALLOW_CREDENTIALS = True
 

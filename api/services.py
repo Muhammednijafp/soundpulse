@@ -1,11 +1,43 @@
 import re
 import subprocess
+import tempfile
 import yt_dlp
 import os
 import json
 import socket
 import urllib.request
 import urllib.parse
+from pathlib import Path
+
+
+def base_ydl_opts(extra=None):
+    """Cloud-safe yt-dlp defaults: bypass datacenter bot checks, retry, timeout."""
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'ignoreerrors': True,
+        'noplaylist': True,
+        'skip_download': True,
+        'nocheckcertificate': True,
+        'geo_bypass': True,
+        'retries': 3,
+        'fragment_retries': 3,
+        'socket_timeout': 20,
+        'extractor_retries': 3,
+        'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
+        # Rotate clients: android/web clients survive datacenter IP blocks best
+        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        },
+    }
+    if extra:
+        opts.update(extra)
+    cookie_file = get_cookie_file()
+    if cookie_file:
+        opts['cookiefile'] = cookie_file
+    return opts
 
 def format_duration(seconds):
     """Format duration in seconds to MM:SS or HH:MM:SS"""
@@ -46,13 +78,9 @@ def search_tracks(query, limit=15):
         return []
     
     clean_query = query.strip()
-    ydl_opts = {
+    ydl_opts = base_ydl_opts({
         'extract_flat': True,
-        'quiet': True,
-        'no_warnings': True,
-        'ignoreerrors': True,
-        'skip_download': True,
-    }
+    })
 
     search_query = f"ytsearch{limit}:{clean_query}"
     
@@ -125,17 +153,9 @@ def get_track_info(target_url_or_id):
     if not target.startswith('http://') and not target.startswith('https://'):
         target = f"https://www.youtube.com/watch?v={target}"
 
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': True,
-        'ignoreerrors': True,
-        'skip_download': True,
-        'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
-    }
-    cookie_file = get_cookie_file()
-    if cookie_file:
-        ydl_opts['cookiefile'] = cookie_file
+    ydl_opts = base_ydl_opts()
+    # get_track_info must raise on failure (no ignoreerrors silent empty)
+    ydl_opts['ignoreerrors'] = False
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(target, download=False)
@@ -178,16 +198,11 @@ def get_direct_audio_stream_info(target_url_or_id):
     if not target.startswith('http://') and not target.startswith('https://'):
         target = f"https://www.youtube.com/watch?v={target}"
 
-    ydl_opts = {
+    ydl_opts = base_ydl_opts({
         'format': 'bestaudio[ext=m4a]/bestaudio/best',
-        'quiet': True,
-        'no_warnings': True,
-        'skip_download': True,
-        'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
-    }
-    cookie_file = get_cookie_file()
-    if cookie_file:
-        ydl_opts['cookiefile'] = cookie_file
+    })
+    # must raise, not silently return None
+    ydl_opts['ignoreerrors'] = False
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(target, download=False)
@@ -218,9 +233,6 @@ def get_direct_audio_url(target_url_or_id):
     info = get_direct_audio_stream_info(target_url_or_id)
     return info['url']
 
-import tempfile
-from pathlib import Path
-
 AUDIO_CACHE_DIR = Path(tempfile.gettempdir()) / 'soundpulse_cache'
 AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -248,23 +260,20 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
         
     outtmpl = str(AUDIO_CACHE_DIR / f"{clean_id}_{bitrate}.%(ext)s")
     
-    ydl_opts = {
+    ydl_opts = base_ydl_opts({
         'format': 'bestaudio/best',
         'outtmpl': outtmpl,
-        'quiet': True,
-        'no_warnings': True,
-        'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
+        'skip_download': False,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': bitrate.replace('k', ''),
         }],
-    }
+    })
+    # download mode: do not ignore errors silently
+    ydl_opts['ignoreerrors'] = False
     if ffmpeg_bin:
         ydl_opts['ffmpeg_location'] = ffmpeg_bin
-    cookie_file = get_cookie_file()
-    if cookie_file:
-        ydl_opts['cookiefile'] = cookie_file
         
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([target])
