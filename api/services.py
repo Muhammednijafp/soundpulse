@@ -20,15 +20,19 @@ def base_ydl_opts(extra=None):
         'skip_download': True,
         'nocheckcertificate': True,
         'geo_bypass': True,
-        'retries': 3,
-        'fragment_retries': 3,
-        'socket_timeout': 20,
-        'extractor_retries': 3,
+        'retries': 5,
+        'fragment_retries': 5,
+        'socket_timeout': 30,
+        'extractor_retries': 5,
         'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
-        # Rotate clients: android/web clients survive datacenter IP blocks best
-        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+        # Rotate cloud-safe clients: web_creator, ios, android, web_embedded survive datacenter IP blocks best
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['web_creator', 'ios', 'android', 'web_embedded'],
+            }
+        },
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             'Accept-Language': 'en-US,en;q=0.9',
         },
     }
@@ -128,7 +132,7 @@ def search_tracks(query, limit=15):
 
 def get_cookie_file():
     """Dynamically parse and format Netscape cookie file from environment variable"""
-    cookies_env = os.getenv('YOUTUBE_COOKIES', '').strip()
+    cookies_env = (os.getenv('YOUTUBE_COOKIES') or os.getenv('COOKIES_DATA') or '').strip()
     if not cookies_env:
         return None
 
@@ -192,41 +196,51 @@ def get_track_info(target_url_or_id):
 
 def get_direct_audio_stream_info(target_url_or_id):
     """
-    Extract the direct audio stream URL and required HTTP headers
+    Extract the direct audio stream URL and required HTTP headers with multi-client fallback
     """
     target = target_url_or_id.strip()
     if not target.startswith('http://') and not target.startswith('https://'):
         target = f"https://www.youtube.com/watch?v={target}"
 
-    ydl_opts = base_ydl_opts({
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
-    })
-    # must raise, not silently return None
-    ydl_opts['ignoreerrors'] = False
+    client_strategies = [
+        ['web_creator', 'ios', 'android', 'web_embedded'],
+        ['ios', 'android', 'web'],
+        ['tv_embedded', 'web_embedded'],
+    ]
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(target, download=False)
-        if not info:
-            raise ValueError("Could not obtain direct audio stream URL.")
-            
-        # Select best audio stream url
-        url = info.get('url')
-        if not url and info.get('formats'):
-            audio_fmts = [f for f in info['formats'] if f.get('acodec') != 'none' and f.get('url')]
-            if audio_fmts:
-                audio_fmts.sort(key=lambda x: x.get('abr') or 0, reverse=True)
-                url = audio_fmts[0].get('url')
-                
-        if not url:
-            raise ValueError("Could not obtain direct audio stream URL.")
-            
-        return {
-            'url': url,
-            'headers': info.get('http_headers', {}),
-            'title': info.get('title') or 'song',
-            'artist': info.get('artist') or info.get('channel') or info.get('uploader') or 'artist',
-            'duration': info.get('duration') or 0
-        }
+    last_error = None
+    for clients in client_strategies:
+        try:
+            ydl_opts = base_ydl_opts({
+                'format': 'bestaudio[ext=m4a]/bestaudio/best',
+                'extractor_args': {'youtube': {'player_client': clients}},
+            })
+            ydl_opts['ignoreerrors'] = False
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(target, download=False)
+                if not info:
+                    continue
+                    
+                url = info.get('url')
+                if not url and info.get('formats'):
+                    audio_fmts = [f for f in info['formats'] if f.get('acodec') != 'none' and f.get('url')]
+                    if audio_fmts:
+                        audio_fmts.sort(key=lambda x: x.get('abr') or 0, reverse=True)
+                        url = audio_fmts[0].get('url')
+                        
+                if url:
+                    return {
+                        'url': url,
+                        'headers': info.get('http_headers', {}),
+                        'title': info.get('title') or 'song',
+                        'artist': info.get('artist') or info.get('channel') or info.get('uploader') or 'artist',
+                        'duration': info.get('duration') or 0
+                    }
+        except Exception as e:
+            last_error = e
+
+    raise ValueError(f"Could not obtain direct audio stream URL: {last_error}")
 
 def get_direct_audio_url(target_url_or_id):
     """Get the direct high-speed audio stream link for web player"""
@@ -238,7 +252,7 @@ AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 def download_track_mp3(target_url_or_id, bitrate='320k'):
     """
-    Downloads and converts track to genuine 320k MP3 using yt-dlp native engine.
+    Downloads and converts track to genuine 320k MP3 using yt-dlp native engine with multi-client rotation.
     Caches the file locally for ultra-fast repeated streaming and downloading.
     """
     clean_id = sanitize_filename(target_url_or_id.split('v=')[-1].split('/')[-1])
@@ -260,33 +274,63 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
         
     outtmpl = str(AUDIO_CACHE_DIR / f"{clean_id}_{bitrate}.%(ext)s")
     
-    ydl_opts = base_ydl_opts({
-        'format': 'bestaudio/best',
-        'outtmpl': outtmpl,
-        'skip_download': False,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': bitrate.replace('k', ''),
-        }],
-    })
-    # download mode: do not ignore errors silently
-    ydl_opts['ignoreerrors'] = False
-    if ffmpeg_bin:
-        ydl_opts['ffmpeg_location'] = ffmpeg_bin
-        
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([target])
-        
-    if mp3_path.exists() and mp3_path.stat().st_size > 0:
-        return str(mp3_path)
-        
-    # Check for any created audio file in cache matching this id
-    for f in AUDIO_CACHE_DIR.glob(f"{clean_id}_{bitrate}.*"):
-        if f.stat().st_size > 0:
-            return str(f)
-            
-    raise RuntimeError(f"Could not extract audio for track: {target_url_or_id}")
+    client_strategies = [
+        ['web_creator', 'ios', 'android', 'web_embedded'],
+        ['ios', 'android', 'web'],
+        ['tv_embedded', 'web_embedded'],
+    ]
+
+    last_error = None
+    for clients in client_strategies:
+        try:
+            ydl_opts = base_ydl_opts({
+                'format': 'bestaudio/best',
+                'outtmpl': outtmpl,
+                'skip_download': False,
+                'extractor_args': {'youtube': {'player_client': clients}},
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': bitrate.replace('k', ''),
+                }],
+            })
+            ydl_opts['ignoreerrors'] = False
+            if ffmpeg_bin:
+                ydl_opts['ffmpeg_location'] = ffmpeg_bin
+                
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([target])
+                
+            if mp3_path.exists() and mp3_path.stat().st_size > 0:
+                return str(mp3_path)
+                
+            # Check for any created audio file in cache matching this id
+            for f in AUDIO_CACHE_DIR.glob(f"{clean_id}_{bitrate}.*"):
+                if f.stat().st_size > 0:
+                    return str(f)
+        except Exception as e:
+            print(f"Download strategy with clients {clients} failed: {e}")
+            last_error = e
+
+    # Fallback to direct stream pipe & ffmpeg transcode
+    try:
+        stream_info = get_direct_audio_stream_info(target)
+        if stream_info and stream_info.get('url'):
+            direct_url = stream_info['url']
+            import subprocess
+            ffmpeg_cmd = ffmpeg_bin or 'ffmpeg'
+            cmd = [
+                ffmpeg_cmd, '-y', '-i', direct_url,
+                '-vn', '-c:a', 'libmp3lame', '-b:a', bitrate,
+                str(mp3_path)
+            ]
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=60)
+            if mp3_path.exists() and mp3_path.stat().st_size > 0:
+                return str(mp3_path)
+    except Exception as e2:
+        print(f"Direct stream transcode fallback failed: {e2}")
+
+    raise RuntimeError(f"Could not extract audio for track: {target_url_or_id} ({last_error})")
 
 def clean_lyrics_query(text):
     """Clean video titles, buzzwords, and bracketed tags to improve lyrics search hits"""
