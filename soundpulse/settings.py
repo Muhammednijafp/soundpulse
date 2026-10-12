@@ -14,13 +14,22 @@ except ImportError:
 
 load_dotenv()
 
-# Ensure Deno and user bin directories are in PATH for yt-dlp JavaScript challenge solver
-for p in [os.path.expanduser('~/.deno/bin'), os.path.expanduser('~/.local_bin')]:
-    if os.path.exists(p) and p not in os.environ.get('PATH', ''):
-        os.environ['PATH'] = f"{p}{os.pathsep}{os.environ.get('PATH', '')}"
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Ensure Deno and local bin directories are in PATH for yt-dlp JavaScript challenge solver
+DENO_CANDIDATE_PATHS = [
+    BASE_DIR / 'bin',
+    BASE_DIR / '.deno' / 'bin',
+    Path('/opt/render/project/src/bin'),
+    Path('/opt/render/project/src/.deno/bin'),
+    Path(os.path.expanduser('~/.deno/bin')),
+    Path(os.path.expanduser('~/.local_bin')),
+]
+for p in DENO_CANDIDATE_PATHS:
+    p_str = str(p)
+    if p.exists() and p_str not in os.environ.get('PATH', ''):
+        os.environ['PATH'] = f"{p_str}{os.pathsep}{os.environ.get('PATH', '')}"
 
 # Quick-start development settings - unsuitable for production
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-soundpulse-mp3-hub-secret-key-2026')

@@ -185,20 +185,29 @@ def get_cookie_file():
         return None
 
 def get_track_info(target_url_or_id):
-    """Extract full track metadata for any video ID or URL"""
+    """Extract full track metadata for any video ID or URL with resilient cookie fallback"""
     target = target_url_or_id.strip()
     if not target.startswith('http://') and not target.startswith('https://'):
         target = f"https://www.youtube.com/watch?v={target}"
 
-    ydl_opts = base_ydl_opts()
-    # get_track_info must raise on failure (no ignoreerrors silent empty)
-    ydl_opts['ignoreerrors'] = False
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(target, download=False)
+    info = None
+    last_err = None
+    # Try with cookies if present, then without cookies if cookies cause an error
+    for use_cookies in [True, False]:
+        try:
+            ydl_opts = base_ydl_opts()
+            ydl_opts['ignoreerrors'] = False
+            if not use_cookies:
+                ydl_opts.pop('cookiefile', None)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(target, download=False)
+                if info:
+                    break
+        except Exception as e:
+            last_err = e
 
     if not info:
-        raise ValueError("Could not retrieve metadata for the provided URL.")
+        raise ValueError(f"Could not retrieve metadata for the provided URL: {last_err}")
 
     track_id = info.get('id', '')
     thumbnail = f"https://i.ytimg.com/vi/{track_id}/maxresdefault.jpg"
@@ -236,30 +245,33 @@ def get_direct_audio_stream_info(target_url_or_id):
         target = f"https://www.youtube.com/watch?v={target}"
 
     cookie_file = get_cookie_file()
+    strategies = []
+    # 1. First try with cookies if configured
     if cookie_file:
-        client_strategies = [
-            ['visionos'],
-            ['web', 'web_embedded'],
-            ['mweb', 'web'],
-            ['tv_downgraded', 'visionos'],
-            ['android', 'visionos'],
-        ]
-    else:
-        client_strategies = [
-            ['visionos'],
-            ['android', 'visionos'],
-            ['tv_downgraded', 'visionos'],
-            ['mweb', 'visionos'],
-        ]
+        strategies.append({'clients': ['visionos'], 'cookiefile': cookie_file})
+        strategies.append({'clients': ['web', 'web_embedded'], 'cookiefile': cookie_file})
+        strategies.append({'clients': ['mweb', 'web'], 'cookiefile': cookie_file})
+        strategies.append({'clients': ['tv_downgraded', 'visionos'], 'cookiefile': cookie_file})
+
+    # 2. Resilient fallback WITHOUT cookies (bypasses stale or flagged cookie blocks)
+    strategies.append({'clients': ['visionos'], 'cookiefile': None})
+    strategies.append({'clients': ['android', 'visionos'], 'cookiefile': None})
+    strategies.append({'clients': ['tv_downgraded', 'visionos'], 'cookiefile': None})
 
     last_error = None
-    for clients in client_strategies:
+    for strat in strategies:
+        clients = strat['clients']
+        cf = strat['cookiefile']
         try:
             ydl_opts = base_ydl_opts({
                 'format': 'bestaudio[ext=m4a]/bestaudio/best',
                 'extractor_args': {'youtube': {'player_client': clients}},
             })
             ydl_opts['ignoreerrors'] = False
+            if cf:
+                ydl_opts['cookiefile'] = cf
+            else:
+                ydl_opts.pop('cookiefile', None)
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(target, download=False)
@@ -319,24 +331,23 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
     outtmpl = str(AUDIO_CACHE_DIR / f"{clean_id}_{bitrate}.%(ext)s")
     
     cookie_file = get_cookie_file()
+    strategies = []
+    # 1. First try with cookies if configured
     if cookie_file:
-        client_strategies = [
-            ['visionos'],
-            ['web', 'web_embedded'],
-            ['mweb', 'web'],
-            ['tv_downgraded', 'visionos'],
-            ['android', 'visionos'],
-        ]
-    else:
-        client_strategies = [
-            ['visionos'],
-            ['android', 'visionos'],
-            ['tv_downgraded', 'visionos'],
-            ['mweb', 'visionos'],
-        ]
+        strategies.append({'clients': ['visionos'], 'cookiefile': cookie_file})
+        strategies.append({'clients': ['web', 'web_embedded'], 'cookiefile': cookie_file})
+        strategies.append({'clients': ['mweb', 'web'], 'cookiefile': cookie_file})
+        strategies.append({'clients': ['tv_downgraded', 'visionos'], 'cookiefile': cookie_file})
+
+    # 2. Resilient fallback WITHOUT cookies (bypasses stale or flagged cookie blocks)
+    strategies.append({'clients': ['visionos'], 'cookiefile': None})
+    strategies.append({'clients': ['android', 'visionos'], 'cookiefile': None})
+    strategies.append({'clients': ['tv_downgraded', 'visionos'], 'cookiefile': None})
 
     last_error = None
-    for clients in client_strategies:
+    for strat in strategies:
+        clients = strat['clients']
+        cf = strat['cookiefile']
         try:
             ydl_opts = base_ydl_opts({
                 'format': 'bestaudio/best',
@@ -350,6 +361,11 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
                 }],
             })
             ydl_opts['ignoreerrors'] = False
+            if cf:
+                ydl_opts['cookiefile'] = cf
+            else:
+                ydl_opts.pop('cookiefile', None)
+
             if ffmpeg_bin:
                 ydl_opts['ffmpeg_location'] = ffmpeg_bin
                 
@@ -364,7 +380,7 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
                 if f.stat().st_size > 0:
                     return str(f)
         except Exception as e:
-            print(f"Download strategy with clients {clients} failed: {e}")
+            print(f"Download strategy with clients {clients} (cookie={bool(cf)}) failed: {e}")
             last_error = e
 
     # Fallback to direct stream pipe & ffmpeg transcode

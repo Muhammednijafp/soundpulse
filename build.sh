@@ -6,13 +6,19 @@ pip install --upgrade pip
 pip install -r requirements.txt
 pip install -U yt-dlp
 
-# Ensure Deno JS runtime is available for yt-dlp YouTube deciphering
-export DENO_INSTALL="${DENO_INSTALL:-$HOME/.deno}"
-export PATH="$DENO_INSTALL/bin:$PATH"
-if ! command -v deno >/dev/null 2>&1; then
-    curl -fsSL https://deno.land/install.sh | sh || true
+# Ensure Deno JS runtime is stored inside the project repository so Render preserves it in runtime
+DENO_DIR="$PWD/.deno"
+export DENO_INSTALL="$DENO_DIR"
+export PATH="$DENO_DIR/bin:$PATH"
+if [ ! -f "$DENO_DIR/bin/deno" ]; then
+    curl -fsSL https://deno.land/install.sh | DENO_INSTALL="$DENO_DIR" sh || true
 fi
-export PATH="$DENO_INSTALL/bin:$PATH"
+mkdir -p "$PWD/bin"
+if [ -f "$DENO_DIR/bin/deno" ]; then
+    cp "$DENO_DIR/bin/deno" "$PWD/bin/deno" || true
+    chmod +x "$PWD/bin/deno" || true
+fi
+export PATH="$PWD/bin:$PATH"
 deno --version || true
 
 # FFmpeg comes from imageio-ffmpeg (pip), no apt needed on free tier.
