@@ -4,6 +4,7 @@ set -o errexit
 
 pip install --upgrade pip
 pip install -r requirements.txt
+pip install -U yt-dlp
 
 # Ensure Deno JS runtime is available for yt-dlp YouTube deciphering
 export DENO_INSTALL="${DENO_INSTALL:-$HOME/.deno}"

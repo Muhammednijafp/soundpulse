@@ -49,14 +49,31 @@ TRENDING_QUERIES = [
 ]
 
 class HealthCheckAPIView(APIView):
-    """Health check endpoint"""
+    """Health check endpoint with system diagnostics"""
     def get(self, request):
-        return Response({
+        import os, shutil
+        cookie_configured = bool(os.getenv('YOUTUBE_COOKIES') or os.getenv('COOKIES_DATA'))
+        deno_found = bool(shutil.which('deno'))
+        ffmpeg_found = False
+        try:
+            import imageio_ffmpeg
+            ffmpeg_found = bool(imageio_ffmpeg.get_ffmpeg_exe())
+        except Exception:
+            ffmpeg_found = bool(shutil.which('ffmpeg'))
+
+        res = Response({
             'status': 'online',
             'backend': 'Django 5.1 & Django REST Framework',
             'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'service': 'SoundPulse MP3 Search, AI Studio & Downloader API'
+            'service': 'SoundPulse MP3 Search, AI Studio & Downloader API',
+            'system': {
+                'cookies_configured': cookie_configured,
+                'deno_available': deno_found,
+                'ffmpeg_available': ffmpeg_found,
+            }
         })
+        res['Access-Control-Allow-Origin'] = '*'
+        return res
 
 class SearchAPIView(APIView):
     """Search tracks by keyword or artist name (e.g. MHR)"""

@@ -14,6 +14,11 @@ except ImportError:
 
 load_dotenv()
 
+# Ensure Deno and user bin directories are in PATH for yt-dlp JavaScript challenge solver
+for p in [os.path.expanduser('~/.deno/bin'), os.path.expanduser('~/.local_bin')]:
+    if os.path.exists(p) and p not in os.environ.get('PATH', ''):
+        os.environ['PATH'] = f"{p}{os.pathsep}{os.environ.get('PATH', '')}"
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -26,6 +31,7 @@ ALLOWED_HOSTS = [host.strip() for host in os.getenv('ALLOWED_HOSTS', '*').split(
 
 # Render free tier: auto-allow the external hostname Render injects
 RENDER_HOSTNAME = os.getenv('RENDER_EXTERNAL_HOSTNAME', '').strip()
+IS_RENDER = bool(os.getenv('RENDER') or RENDER_HOSTNAME)
 if RENDER_HOSTNAME and RENDER_HOSTNAME not in ALLOWED_HOSTS and '*' not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(RENDER_HOSTNAME)
 
@@ -91,6 +97,14 @@ ASGI_APPLICATION = 'soundpulse.asgi.application'
 # Database configuration: Supports DATABASE_URL, MySQL (XAMPP / phpMyAdmin / Cloud MySQL), or SQLite fallback
 DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
 DB_ENGINE = os.getenv('DB_ENGINE', 'sqlite').lower()
+
+# On Render cloud hosting, ignore local 127.0.0.1 MySQL configurations and default to SQLite
+if IS_RENDER:
+    if '127.0.0.1' in DATABASE_URL or 'localhost' in DATABASE_URL:
+        DATABASE_URL = ''
+        DB_ENGINE = 'sqlite'
+    elif DB_ENGINE == 'mysql' and os.getenv('DB_HOST', '') in ('127.0.0.1', 'localhost', ''):
+        DB_ENGINE = 'sqlite'
 
 DATABASES = {
     'default': {

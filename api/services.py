@@ -12,6 +12,9 @@ from pathlib import Path
 
 def base_ydl_opts(extra=None):
     """Cloud-safe yt-dlp defaults: bypass datacenter bot checks, retry, timeout."""
+    cookie_file = get_cookie_file()
+    # Default to visionos: modern client that bypasses YouTube datacenter bot wall without login
+    default_clients = ['visionos', 'web'] if cookie_file else ['visionos']
     opts = {
         'quiet': True,
         'no_warnings': True,
@@ -25,10 +28,9 @@ def base_ydl_opts(extra=None):
         'socket_timeout': 30,
         'extractor_retries': 5,
         'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
-        # Rotate cloud-safe clients: web_creator, ios, android, web_embedded survive datacenter IP blocks best
         'extractor_args': {
             'youtube': {
-                'player_client': ['web_creator', 'ios', 'android', 'web_embedded'],
+                'player_client': default_clients,
             }
         },
         'http_headers': {
@@ -38,7 +40,6 @@ def base_ydl_opts(extra=None):
     }
     if extra:
         opts.update(extra)
-    cookie_file = get_cookie_file()
     if cookie_file:
         opts['cookiefile'] = cookie_file
     return opts
@@ -131,7 +132,7 @@ def search_tracks(query, limit=15):
     return tracks
 
 def get_cookie_file():
-    """Dynamically parse and format Netscape cookie file from environment variable"""
+    """Dynamically parse and format Netscape cookie file from environment variable (supports raw text or Base64)"""
     cookies_env = (os.getenv('YOUTUBE_COOKIES') or os.getenv('COOKIES_DATA') or '').strip()
     if not cookies_env:
         return None
@@ -140,12 +141,44 @@ def get_cookie_file():
         return cookies_env
 
     try:
-        raw_content = cookies_env.replace('\\n', '\n').replace('\\t', '\t')
-        if '# Netscape' not in raw_content:
-            raw_content = "# Netscape HTTP Cookie File\n# http://curl.haxx.se/rfc/cookie_spec.html\n" + raw_content
+        raw_content = cookies_env
+        # 1. Base64 auto-detection and decode
+        if not raw_content.startswith('#') and len(raw_content) > 50:
+            try:
+                import base64
+                decoded = base64.b64decode(raw_content).decode('utf-8', errors='ignore')
+                if '# Netscape' in decoded or '\t' in decoded or 'youtube.com' in decoded:
+                    raw_content = decoded
+            except Exception:
+                pass
+
+        # 2. Unescape literal newlines and tabs
+        raw_content = raw_content.replace('\\n', '\n').replace('\\t', '\t')
+
+        # 3. Clean lines and reconstruct tabs if Render web UI collapsed them into spaces
+        lines = []
+        for line in raw_content.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith('#'):
+                lines.append(line)
+                continue
+            if '\t' in line:
+                lines.append(line)
+            else:
+                parts = line.split(None, 6)
+                if len(parts) >= 6:
+                    lines.append('\t'.join(parts))
+                else:
+                    lines.append(line)
+
+        final_content = '\n'.join(lines)
+        if '# Netscape' not in final_content:
+            final_content = "# Netscape HTTP Cookie File\n# http://curl.haxx.se/rfc/cookie_spec.html\n" + final_content + "\n"
 
         cookie_tmp = Path(tempfile.gettempdir()) / 'yt_cookies.txt'
-        cookie_tmp.write_text(raw_content, encoding='utf-8')
+        cookie_tmp.write_text(final_content, encoding='utf-8')
         return str(cookie_tmp)
     except Exception as e:
         print(f"Error preparing cookie file: {e}")
@@ -202,11 +235,22 @@ def get_direct_audio_stream_info(target_url_or_id):
     if not target.startswith('http://') and not target.startswith('https://'):
         target = f"https://www.youtube.com/watch?v={target}"
 
-    client_strategies = [
-        ['web_creator', 'ios', 'android', 'web_embedded'],
-        ['ios', 'android', 'web'],
-        ['tv_embedded', 'web_embedded'],
-    ]
+    cookie_file = get_cookie_file()
+    if cookie_file:
+        client_strategies = [
+            ['visionos'],
+            ['web', 'web_embedded'],
+            ['mweb', 'web'],
+            ['tv_downgraded', 'visionos'],
+            ['android', 'visionos'],
+        ]
+    else:
+        client_strategies = [
+            ['visionos'],
+            ['android', 'visionos'],
+            ['tv_downgraded', 'visionos'],
+            ['mweb', 'visionos'],
+        ]
 
     last_error = None
     for clients in client_strategies:
@@ -274,11 +318,22 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
         
     outtmpl = str(AUDIO_CACHE_DIR / f"{clean_id}_{bitrate}.%(ext)s")
     
-    client_strategies = [
-        ['web_creator', 'ios', 'android', 'web_embedded'],
-        ['ios', 'android', 'web'],
-        ['tv_embedded', 'web_embedded'],
-    ]
+    cookie_file = get_cookie_file()
+    if cookie_file:
+        client_strategies = [
+            ['visionos'],
+            ['web', 'web_embedded'],
+            ['mweb', 'web'],
+            ['tv_downgraded', 'visionos'],
+            ['android', 'visionos'],
+        ]
+    else:
+        client_strategies = [
+            ['visionos'],
+            ['android', 'visionos'],
+            ['tv_downgraded', 'visionos'],
+            ['mweb', 'visionos'],
+        ]
 
     last_error = None
     for clients in client_strategies:
