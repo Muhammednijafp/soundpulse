@@ -11,10 +11,7 @@ from pathlib import Path
 
 
 def base_ydl_opts(extra=None):
-    """Cloud-safe yt-dlp defaults: bypass datacenter bot checks, retry, timeout."""
-    cookie_file = get_cookie_file()
-    # Default to visionos: modern client that bypasses YouTube datacenter bot wall without login
-    default_clients = ['visionos', 'web'] if cookie_file else ['visionos']
+    """Cloud-safe yt-dlp defaults: fast timeout, no hanging retries."""
     opts = {
         'quiet': True,
         'no_warnings': True,
@@ -23,14 +20,14 @@ def base_ydl_opts(extra=None):
         'skip_download': True,
         'nocheckcertificate': True,
         'geo_bypass': True,
-        'retries': 5,
-        'fragment_retries': 5,
-        'socket_timeout': 30,
-        'extractor_retries': 5,
+        'retries': 2,
+        'fragment_retries': 2,
+        'socket_timeout': 12,
+        'extractor_retries': 2,
         'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
         'extractor_args': {
             'youtube': {
-                'player_client': default_clients,
+                'player_client': ['android', 'visionos'],
             }
         },
         'http_headers': {
@@ -40,8 +37,6 @@ def base_ydl_opts(extra=None):
     }
     if extra:
         opts.update(extra)
-    if cookie_file:
-        opts['cookiefile'] = cookie_file
     return opts
 
 def format_duration(seconds):
@@ -245,18 +240,16 @@ def get_direct_audio_stream_info(target_url_or_id):
         target = f"https://www.youtube.com/watch?v={target}"
 
     cookie_file = get_cookie_file()
-    strategies = []
-    # 1. First try with cookies if configured
-    if cookie_file:
-        strategies.append({'clients': ['visionos'], 'cookiefile': cookie_file})
-        strategies.append({'clients': ['web', 'web_embedded'], 'cookiefile': cookie_file})
-        strategies.append({'clients': ['mweb', 'web'], 'cookiefile': cookie_file})
-        strategies.append({'clients': ['tv_downgraded', 'visionos'], 'cookiefile': cookie_file})
-
-    # 2. Resilient fallback WITHOUT cookies (bypasses stale or flagged cookie blocks)
-    strategies.append({'clients': ['visionos'], 'cookiefile': None})
-    strategies.append({'clients': ['android', 'visionos'], 'cookiefile': None})
-    strategies.append({'clients': ['tv_downgraded', 'visionos'], 'cookiefile': None})
+    strategies = [
+        # 1. High-speed clean sessions (no cookie overhead, avoids cloud IP bot blocks)
+        {'clients': ['android'], 'cookiefile': None},
+        {'clients': ['visionos'], 'cookiefile': None},
+        # 2. Try with cookies if provided
+        {'clients': ['android'], 'cookiefile': cookie_file} if cookie_file else None,
+        {'clients': ['visionos'], 'cookiefile': cookie_file} if cookie_file else None,
+        {'clients': ['tv_downgraded'], 'cookiefile': None},
+    ]
+    strategies = [s for s in strategies if s]
 
     last_error = None
     for strat in strategies:
@@ -331,18 +324,16 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
     outtmpl = str(AUDIO_CACHE_DIR / f"{clean_id}_{bitrate}.%(ext)s")
     
     cookie_file = get_cookie_file()
-    strategies = []
-    # 1. First try with cookies if configured
-    if cookie_file:
-        strategies.append({'clients': ['visionos'], 'cookiefile': cookie_file})
-        strategies.append({'clients': ['web', 'web_embedded'], 'cookiefile': cookie_file})
-        strategies.append({'clients': ['mweb', 'web'], 'cookiefile': cookie_file})
-        strategies.append({'clients': ['tv_downgraded', 'visionos'], 'cookiefile': cookie_file})
-
-    # 2. Resilient fallback WITHOUT cookies (bypasses stale or flagged cookie blocks)
-    strategies.append({'clients': ['visionos'], 'cookiefile': None})
-    strategies.append({'clients': ['android', 'visionos'], 'cookiefile': None})
-    strategies.append({'clients': ['tv_downgraded', 'visionos'], 'cookiefile': None})
+    strategies = [
+        # 1. High-speed clean sessions (no cookie overhead, avoids cloud IP bot blocks)
+        {'clients': ['android'], 'cookiefile': None},
+        {'clients': ['visionos'], 'cookiefile': None},
+        # 2. Try with cookies if provided
+        {'clients': ['android'], 'cookiefile': cookie_file} if cookie_file else None,
+        {'clients': ['visionos'], 'cookiefile': cookie_file} if cookie_file else None,
+        {'clients': ['tv_downgraded'], 'cookiefile': None},
+    ]
+    strategies = [s for s in strategies if s]
 
     last_error = None
     for strat in strategies:

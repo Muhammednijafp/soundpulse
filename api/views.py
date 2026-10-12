@@ -270,15 +270,16 @@ class DownloadMp3APIView(APIView):
             res['Access-Control-Allow-Origin'] = '*'
             return res
 
-        # 1. Fetch metadata for clean naming
-        track_title = 'song'
-        track_artist = 'audio'
-        try:
-            meta = get_track_info(url_or_id)
-            track_title = meta.get('title', 'song')
-            track_artist = meta.get('artist', 'audio')
-        except Exception:
-            pass
+        # 1. Fetch metadata for clean naming (skip redundant network call if provided)
+        track_title = request.query_params.get('title') or 'song'
+        track_artist = request.query_params.get('artist') or 'audio'
+        if track_title == 'song':
+            try:
+                meta = get_track_info(url_or_id)
+                track_title = meta.get('title', 'song')
+                track_artist = meta.get('artist', 'audio')
+            except Exception:
+                pass
 
         filename = sanitize_filename(f"{track_title} - {track_artist}") or 'download'
         encoded_filename = urllib.parse.quote(f"{filename}.mp3")
