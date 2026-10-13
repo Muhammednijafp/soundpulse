@@ -205,13 +205,19 @@ STATICFILES_DIRS = [
     BASE_DIR.parent / 'client' / 'dist',
 ] if (BASE_DIR.parent / 'client' / 'dist').exists() else []
 
-# WhiteNoise compressed static storage (safe even when WhiteNoise missing locally)
+# Static storage (WhiteNoise with standard fallback)
+try:
+    import whitenoise  # noqa: F401
+    STATIC_STORAGE_BACKEND = 'whitenoise.storage.CompressedStaticFilesStorage'
+except ImportError:
+    STATIC_STORAGE_BACKEND = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+
 STORAGES = {
     'default': {
         'BACKEND': 'django.core.files.storage.FileSystemStorage',
     },
     'staticfiles': {
-        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
+        'BACKEND': STATIC_STORAGE_BACKEND,
     },
 }
 
