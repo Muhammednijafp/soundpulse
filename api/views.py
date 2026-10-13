@@ -126,17 +126,24 @@ class TrackInfoAPIView(APIView):
     def get(self, request):
         return self.post(request)
 
+def apply_cors_headers(response, request):
+    """Ensure reliable cross-origin headers that comply with fetch and credentials mode"""
+    origin = request.headers.get('Origin') or request.META.get('HTTP_ORIGIN') or '*'
+    response['Access-Control-Allow-Origin'] = origin
+    if origin != '*':
+        response['Access-Control-Allow-Credentials'] = 'true'
+    response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+    response['Access-Control-Allow-Headers'] = 'Range, Accept, Origin, Content-Type, Authorization, X-Requested-With'
+    response['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Length, Content-Type, Accept-Ranges, Content-Range'
+    response['Cross-Origin-Resource-Policy'] = 'cross-origin'
+    response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
+    return response
+
 class StreamAudioAPIView(APIView):
     """Direct high-performance audio streaming with support for Range, instant proxying, and smooth web playback"""
     def options(self, request, *args, **kwargs):
         response = Response(status=status.HTTP_200_OK)
-        response['Access-Control-Allow-Origin'] = '*'
-        response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'Range, Accept, Origin, Content-Type, Authorization, X-Requested-With'
-        response['Access-Control-Expose-Headers'] = 'Content-Range, Content-Length, Accept-Ranges, Content-Type'
-        response['Cross-Origin-Resource-Policy'] = 'cross-origin'
-        response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
-        return response
+        return apply_cors_headers(response, request)
 
     def get(self, request):
         url_or_id = request.query_params.get('id') or request.query_params.get('url')
@@ -249,13 +256,7 @@ class DownloadMp3APIView(APIView):
     """Transcode and stream high-quality MP3 attachment directly to device Downloads folder"""
     def options(self, request, *args, **kwargs):
         response = Response(status=status.HTTP_200_OK)
-        response['Access-Control-Allow-Origin'] = '*'
-        response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'Range, Accept, Origin, Content-Type, Authorization, X-Requested-With'
-        response['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Length, Content-Type'
-        response['Cross-Origin-Resource-Policy'] = 'cross-origin'
-        response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
-        return response
+        return apply_cors_headers(response, request)
 
     def get(self, request):
         import os
@@ -267,8 +268,7 @@ class DownloadMp3APIView(APIView):
                 {'success': False, 'error': 'Track "id" or "url" is required for download.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-            res['Access-Control-Allow-Origin'] = '*'
-            return res
+            return apply_cors_headers(res, request)
 
         # 1. Fetch metadata for clean naming (skip redundant network call if provided)
         track_title = request.query_params.get('title') or 'song'
@@ -296,12 +296,8 @@ class DownloadMp3APIView(APIView):
                 response = FileResponse(open(mp3_path, 'rb'), content_type='audio/mpeg')
                 response['Content-Disposition'] = content_disposition
                 response['Content-Length'] = file_size
-                response['Access-Control-Allow-Origin'] = '*'
-                response['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Length, Content-Type'
-                response['Cross-Origin-Resource-Policy'] = 'cross-origin'
-                response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
                 response['Cache-Control'] = 'no-cache'
-                return response
+                return apply_cors_headers(response, request)
         except Exception as e:
             print(f"MP3 transcode error: {e}, attempting direct stream download...")
 
@@ -335,19 +331,13 @@ class DownloadMp3APIView(APIView):
             response['Content-Disposition'] = content_disposition
             if content_length:
                 response['Content-Length'] = content_length
-            response['Access-Control-Allow-Origin'] = '*'
-            response['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Length, Content-Type'
-            response['Cross-Origin-Resource-Policy'] = 'cross-origin'
-            response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
-            return response
+            return apply_cors_headers(response, request)
         except Exception as e2:
             res = Response(
                 {'success': False, 'error': f'Download failed: {str(e2)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-            res['Access-Control-Allow-Origin'] = '*'
-            res['Cross-Origin-Resource-Policy'] = 'cross-origin'
-            return res
+            return apply_cors_headers(res, request)
 
 class TrendingAPIView(APIView):
     """Trending playlists and charts"""
