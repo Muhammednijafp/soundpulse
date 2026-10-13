@@ -64,11 +64,13 @@ def format_views(views):
     return str(views)
 
 def sanitize_filename(name):
-    """Sanitize filename to prevent illegal filesystem/header characters"""
+    """Sanitize filename to prevent illegal filesystem/header characters and Latin-1 header crashes"""
     if not name:
         return "song_audio"
+    clean = str(name).replace('\u2013', '-').replace('\u2014', '-').replace('\u2212', '-')
+    clean = clean.replace('“', "'").replace('”', "'").replace('‘', "'").replace('’', "'")
     # Remove characters like \ / : * ? " < > |
-    sanitized = re.sub(r'[\\/*?:"<>|]', '', str(name))
+    sanitized = re.sub(r'[\\/*?:"<>|]', '', clean)
     sanitized = re.sub(r'\s+', ' ', sanitized).strip()
     return sanitized[:100]
 

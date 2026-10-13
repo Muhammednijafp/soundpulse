@@ -282,7 +282,10 @@ class DownloadMp3APIView(APIView):
                 pass
 
         filename = sanitize_filename(f"{track_title} - {track_artist}") or 'download'
+        # Strict ASCII fallback for HTTP header compatibility across WSGI and reverse proxies (prevents Latin-1 header crash)
+        ascii_fallback = ''.join(c for c in filename if 32 <= ord(c) <= 126).replace('"', '').strip() or 'song'
         encoded_filename = urllib.parse.quote(f"{filename}.mp3")
+        content_disposition = f'attachment; filename="{ascii_fallback}.mp3"; filename*=UTF-8\'\'{encoded_filename}'
 
         # 2. Return FileResponse with genuine MP3 binary
         try:
@@ -291,7 +294,7 @@ class DownloadMp3APIView(APIView):
             file_size = os.path.getsize(mp3_path)
             if file_size > 1000:
                 response = FileResponse(open(mp3_path, 'rb'), content_type='audio/mpeg')
-                response['Content-Disposition'] = f'attachment; filename="{filename}.mp3"; filename*=UTF-8\'\'{encoded_filename}'
+                response['Content-Disposition'] = content_disposition
                 response['Content-Length'] = file_size
                 response['Access-Control-Allow-Origin'] = '*'
                 response['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Length, Content-Type'
@@ -329,7 +332,7 @@ class DownloadMp3APIView(APIView):
                     upstream.close()
 
             response = StreamingHttpResponse(chunk_generator(), content_type=content_type)
-            response['Content-Disposition'] = f'attachment; filename="{filename}.mp3"; filename*=UTF-8\'\'{encoded_filename}'
+            response['Content-Disposition'] = content_disposition
             if content_length:
                 response['Content-Length'] = content_length
             response['Access-Control-Allow-Origin'] = '*'
