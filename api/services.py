@@ -129,7 +129,7 @@ def search_tracks(query, limit=15):
     return tracks
 
 def get_cookie_file():
-    """Dynamically parse and format Netscape cookie file from environment variable (supports raw text or Base64)"""
+    """Dynamically parse and format Netscape cookie file from environment variable (supports JSON, header, raw Netscape, or Base64)"""
     cookies_env = (os.getenv('YOUTUBE_COOKIES') or os.getenv('COOKIES_DATA') or '').strip()
     if not cookies_env:
         return None
@@ -139,20 +139,58 @@ def get_cookie_file():
 
     try:
         raw_content = cookies_env
+
         # 1. Base64 auto-detection and decode
-        if not raw_content.startswith('#') and len(raw_content) > 50:
+        if not raw_content.startswith('#') and not raw_content.startswith('[') and len(raw_content) > 50:
             try:
                 import base64
                 decoded = base64.b64decode(raw_content).decode('utf-8', errors='ignore')
-                if '# Netscape' in decoded or '\t' in decoded or 'youtube.com' in decoded:
+                if '# Netscape' in decoded or '\t' in decoded or 'youtube.com' in decoded or '[' in decoded:
                     raw_content = decoded
             except Exception:
                 pass
 
-        # 2. Unescape literal newlines and tabs
-        raw_content = raw_content.replace('\\n', '\n').replace('\\t', '\t')
+        # 2. JSON array auto-detection (Cookie-Editor default export)
+        if raw_content.startswith('[') or (raw_content.startswith('{') and 'cookies' in raw_content):
+            try:
+                data = json.loads(raw_content)
+                if isinstance(data, dict) and 'cookies' in data:
+                    data = data['cookies']
+                if isinstance(data, list):
+                    lines = ["# Netscape HTTP Cookie File", "# http://curl.haxx.se/rfc/cookie_spec.html"]
+                    for c in data:
+                        if not isinstance(c, dict):
+                            continue
+                        domain = c.get('domain', '.youtube.com')
+                        flag = 'TRUE' if domain.startswith('.') else 'FALSE'
+                        path = c.get('path', '/')
+                        secure = 'TRUE' if c.get('secure', False) else 'FALSE'
+                        exp = str(int(c.get('expirationDate') or c.get('expires') or 1799999999))
+                        name = c.get('name', '')
+                        val = c.get('value', '')
+                        if name:
+                            lines.append(f"{domain}\t{flag}\t{path}\t{secure}\t{exp}\t{name}\t{val}")
+                    if len(lines) > 2:
+                        cookie_tmp = Path(tempfile.gettempdir()) / 'yt_cookies.txt'
+                        cookie_tmp.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+                        return str(cookie_tmp)
+            except Exception as e:
+                print(f"JSON cookie parse warning: {e}")
 
-        # 3. Clean lines and reconstruct tabs if Render web UI collapsed them into spaces
+        # 3. Cookie header string format (name=val; name2=val2)
+        if ';' in raw_content and '\t' not in raw_content and not raw_content.startswith('#'):
+            pairs = [p.strip() for p in raw_content.split(';') if '=' in p]
+            if len(pairs) >= 2:
+                lines = ["# Netscape HTTP Cookie File", "# http://curl.haxx.se/rfc/cookie_spec.html"]
+                for pair in pairs:
+                    k, v = pair.split('=', 1)
+                    lines.append(f".youtube.com\tTRUE\t/\tTRUE\t1799999999\t{k.strip()}\t{v.strip()}")
+                cookie_tmp = Path(tempfile.gettempdir()) / 'yt_cookies.txt'
+                cookie_tmp.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+                return str(cookie_tmp)
+
+        # 4. Standard Netscape format (with literal unescaping and whitespace fixing)
+        raw_content = raw_content.replace('\\n', '\n').replace('\\t', '\t')
         lines = []
         for line in raw_content.splitlines():
             line = line.strip()
@@ -242,16 +280,20 @@ def get_direct_audio_stream_info(target_url_or_id):
         target = f"https://www.youtube.com/watch?v={target}"
 
     cookie_file = get_cookie_file()
-    strategies = [
-        # 1. High-speed clean sessions (no cookie overhead, avoids cloud IP bot blocks)
+    strategies = []
+    if cookie_file:
+        # Use clients that support authentication cookies first
+        strategies.extend([
+            {'clients': ['web'], 'cookiefile': cookie_file},
+            {'clients': ['mweb', 'web'], 'cookiefile': cookie_file},
+            {'clients': ['tv_downgraded'], 'cookiefile': cookie_file},
+        ])
+    # Fallback to mobile clients without cookies
+    strategies.extend([
         {'clients': ['android'], 'cookiefile': None},
         {'clients': ['visionos'], 'cookiefile': None},
-        # 2. Try with cookies if provided
-        {'clients': ['android'], 'cookiefile': cookie_file} if cookie_file else None,
-        {'clients': ['visionos'], 'cookiefile': cookie_file} if cookie_file else None,
         {'clients': ['tv_downgraded'], 'cookiefile': None},
-    ]
-    strategies = [s for s in strategies if s]
+    ])
 
     last_error = None
     for strat in strategies:
@@ -326,16 +368,20 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
     outtmpl = str(AUDIO_CACHE_DIR / f"{clean_id}_{bitrate}.%(ext)s")
     
     cookie_file = get_cookie_file()
-    strategies = [
-        # 1. High-speed clean sessions (no cookie overhead, avoids cloud IP bot blocks)
+    strategies = []
+    if cookie_file:
+        # Use clients that support authentication cookies first
+        strategies.extend([
+            {'clients': ['web'], 'cookiefile': cookie_file},
+            {'clients': ['mweb', 'web'], 'cookiefile': cookie_file},
+            {'clients': ['tv_downgraded'], 'cookiefile': cookie_file},
+        ])
+    # Fallback to mobile clients without cookies
+    strategies.extend([
         {'clients': ['android'], 'cookiefile': None},
         {'clients': ['visionos'], 'cookiefile': None},
-        # 2. Try with cookies if provided
-        {'clients': ['android'], 'cookiefile': cookie_file} if cookie_file else None,
-        {'clients': ['visionos'], 'cookiefile': cookie_file} if cookie_file else None,
         {'clients': ['tv_downgraded'], 'cookiefile': None},
-    ]
-    strategies = [s for s in strategies if s]
+    ])
 
     last_error = None
     for strat in strategies:
