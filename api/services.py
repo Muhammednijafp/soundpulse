@@ -20,11 +20,10 @@ def base_ydl_opts(extra=None):
         'skip_download': True,
         'nocheckcertificate': True,
         'geo_bypass': True,
-        'retries': 2,
-        'fragment_retries': 2,
-        'socket_timeout': 12,
-        'extractor_retries': 2,
-        'js_runtimes': {'node': {}, 'deno': {}, 'quickjs': {}},
+        'retries': 1,
+        'fragment_retries': 1,
+        'socket_timeout': 8,
+        'extractor_retries': 1,
         'extractor_args': {
             'youtube': {
                 'player_client': ['android', 'visionos'],
@@ -280,20 +279,18 @@ def get_direct_audio_stream_info(target_url_or_id):
         target = f"https://www.youtube.com/watch?v={target}"
 
     cookie_file = get_cookie_file()
-    strategies = []
+    # 1. High-speed mobile and TV clients first (no JS runtime required, extracts in ~1-2s)
+    strategies = [
+        {'clients': ['android'], 'cookiefile': None},
+        {'clients': ['visionos'], 'cookiefile': None},
+        {'clients': ['tv_downgraded'], 'cookiefile': cookie_file or None},
+    ]
+    # 2. Cookie-based web clients if cookies are available
     if cookie_file:
-        # Use clients that support authentication cookies first
         strategies.extend([
             {'clients': ['web'], 'cookiefile': cookie_file},
             {'clients': ['mweb', 'web'], 'cookiefile': cookie_file},
-            {'clients': ['tv_downgraded'], 'cookiefile': cookie_file},
         ])
-    # Fallback to mobile clients without cookies
-    strategies.extend([
-        {'clients': ['android'], 'cookiefile': None},
-        {'clients': ['visionos'], 'cookiefile': None},
-        {'clients': ['tv_downgraded'], 'cookiefile': None},
-    ])
 
     last_error = None
     for strat in strategies:
@@ -301,7 +298,7 @@ def get_direct_audio_stream_info(target_url_or_id):
         cf = strat['cookiefile']
         try:
             ydl_opts = base_ydl_opts({
-                'format': 'bestaudio[ext=m4a]/bestaudio/best',
+                'format': '140/251/ba/bestaudio[ext=m4a]/bestaudio/best',
                 'extractor_args': {'youtube': {'player_client': clients}},
             })
             ydl_opts['ignoreerrors'] = False
@@ -368,20 +365,18 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
     outtmpl = str(AUDIO_CACHE_DIR / f"{clean_id}_{bitrate}.%(ext)s")
     
     cookie_file = get_cookie_file()
-    strategies = []
+    # 1. High-speed mobile and TV clients first (no JS runtime required, extracts in ~1-2s)
+    strategies = [
+        {'clients': ['android'], 'cookiefile': None},
+        {'clients': ['visionos'], 'cookiefile': None},
+        {'clients': ['tv_downgraded'], 'cookiefile': cookie_file or None},
+    ]
+    # 2. Cookie-based web clients if cookies are available
     if cookie_file:
-        # Use clients that support authentication cookies first
         strategies.extend([
             {'clients': ['web'], 'cookiefile': cookie_file},
             {'clients': ['mweb', 'web'], 'cookiefile': cookie_file},
-            {'clients': ['tv_downgraded'], 'cookiefile': cookie_file},
         ])
-    # Fallback to mobile clients without cookies
-    strategies.extend([
-        {'clients': ['android'], 'cookiefile': None},
-        {'clients': ['visionos'], 'cookiefile': None},
-        {'clients': ['tv_downgraded'], 'cookiefile': None},
-    ])
 
     last_error = None
     for strat in strategies:
@@ -389,7 +384,7 @@ def download_track_mp3(target_url_or_id, bitrate='320k'):
         cf = strat['cookiefile']
         try:
             ydl_opts = base_ydl_opts({
-                'format': 'bestaudio/best',
+                'format': '140/251/ba/bestaudio/best',
                 'outtmpl': outtmpl,
                 'skip_download': False,
                 'extractor_args': {'youtube': {'player_client': clients}},
